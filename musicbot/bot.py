@@ -22,7 +22,7 @@ from discord.ext.commands.bot import _get_variable
 from io import BytesIO
 from functools import wraps
 from textwrap import dedent
-from datetime import timedelta
+from datetime import datetime, timedelta
 from random import choice, shuffle
 from collections import defaultdict
 
@@ -31,6 +31,7 @@ from musicbot.player import MusicPlayer
 from musicbot.config import Config, ConfigDefaults
 from musicbot.permissions import Permissions, PermissionsDefaults
 from musicbot.utils import load_file, write_file, sane_round_int
+from musicbot.pubg import Pubg
 
 from . import exceptions
 from . import downloader
@@ -86,6 +87,7 @@ class MusicBot(discord.Client):
         self.exit_signal = None
         self.init_ok = False
         self.cached_client_id = None
+        self.pubg = Pubg()
 
         if not self.autoplaylist:
             print("Warning: Autoplaylist is empty, disabling.")
@@ -1384,6 +1386,25 @@ class MusicBot(discord.Client):
         await self.safe_delete_message(hand, quiet=True)
         return Response(":ok_hand:", delete_after=15)
 
+    async def cmd_top1(self, channel, players):
+        """
+        Usage:
+            {command_prefix}top1 players,name,separated,by,comma
+
+        Shuffles the playlist.
+        """
+        await self.send_message(channel, self.pubg.get_last(players))
+        self.pubg.new_top(players)
+
+    async def cmd_lasttop1(self, channel, players=None):
+        """
+        Usage:
+            {command_prefix}top1 players,name,separated,by,comma
+
+        Shuffles the playlist.
+        """
+        await self.send_message(channel, self.pubg.get_last(players))
+
     async def cmd_clear(self, player, author):
         """
         Usage:
@@ -1729,47 +1750,45 @@ class MusicBot(discord.Client):
             await player.playlist.add_entry(song_url, channel=None, author=None)
 
     async def cmd_updateplaylist(self, channel, song_url):
-                """
-                Usage:
-                    {command_prefix}pldump url
+        """
+        Usage:
+            {command_prefix}pldump url
 
-                Dumps the individual urls of a playlist
-                """
+        Dumps the individual urls of a playlist
+        """
 
-                try:
-                    info = await self.downloader.extract_info(self.loop, song_url.strip('<>'), download=False, process=False)
-                except Exception as e:
-                    raise exceptions.CommandError("Could not extract info from input url\n%s\n" % e, expire_in=25)
+        try:
+            info = await self.downloader.extract_info(self.loop, song_url.strip('<>'), download=False, process=False)
+        except Exception as e:
+            raise exceptions.CommandError("Could not extract info from input url\n%s\n" % e, expire_in=25)
 
-                if not info:
-                    raise exceptions.CommandError("Could not extract info from input url, no data.", expire_in=25)
+        if not info:
+            raise exceptions.CommandError("Could not extract info from input url, no data.", expire_in=25)
 
-                if not info.get('entries', None):
-                    # TODO: Retarded playlist checking
-                    # set(url, webpageurl).difference(set(url))
+        if not info.get('entries', None):
+            # TODO: Retarded playlist checking
+            # set(url, webpageurl).difference(set(url))
 
-                    if info.get('url', None) != info.get('webpage_url', info.get('url', None)):
-                        raise exceptions.CommandError("This does not seem to be a playlist.", expire_in=25)
-                    else:
-                        return await self.cmd_pldump(channel, info.get(''))
+            if info.get('url', None) != info.get('webpage_url', info.get('url', None)):
+                raise exceptions.CommandError("This does not seem to be a playlist.", expire_in=25)
+            else:
+                return await self.cmd_pldump(channel, info.get(''))
 
-                linegens = defaultdict(lambda: None, **{
-                    "youtube":    lambda d: 'https://www.youtube.com/watch?v=%s' % d['id'],
-                    "soundcloud": lambda d: d['url'],
-                    "bandcamp":   lambda d: d['url']
-                })
+        linegens = defaultdict(lambda: None, **{
+            "youtube":    lambda d: 'https://www.youtube.com/watch?v=%s' % d['id'],
+            "soundcloud": lambda d: d['url'],
+            "bandcamp":   lambda d: d['url']
+        })
 
-                exfunc = linegens[info['extractor'].split(':')[0]]
+        exfunc = linegens[info['extractor'].split(':')[0]]
 
-                if not exfunc:
-                    raise exceptions.CommandError("Could not extract info from input url, unsupported playlist type.", expire_in=25)
+        if not exfunc:
+            raise exceptions.CommandError("Could not extract info from input url, unsupported playlist type.", expire_in=25)
 
-                with open('config/autoplaylist.txt', 'wb') as f:
-                    for item in info['entries']:
-                        habba = exfunc(item).encode('utf8') + b'\n'
-                        f.write(habba)
-
-
+        with open('config/autoplaylist.txt', 'wb') as f:
+            for item in info['entries']:
+                habba = exfunc(item).encode('utf8') + b'\n'
+                f.write(habba)
 
     async def cmd_stream(self, channel):
         url = "https://api.twitch.tv/kraken/streams/"
